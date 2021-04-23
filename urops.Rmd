@@ -1,0 +1,1850 @@
+---
+title: "Monte Carlo Methods with Application in Fincance"
+author: "Zhang Xinran"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+## 2.1 Control Variates Method
+### Goal
+To estimate E[X] 
+
+### Method
+n samples {Xi} and n control variate samples {Yi}, with E(Y)= µ_bar.  
+The estimate is then *v_est = mean(X)-b\*(mean(Y)-µ_bar)*, where b is a fixed constant.  
+The variance of estimate is reduced with a good choice of b. 
+
+### Optimal choice of b
+the one that minimizes the variance of v_est.  
+b_optimal_est = sum((Xi-mean(X))(Yi-mean(Y)))/sum((Yi-mean(Y))^2)
+
+### Example 2.1 
+Use underlying stock price as *control variates* to estimate the price of a call option with maturaty T and strike price K.
+```{r}
+S0 = 50
+r = 0.05
+sigma = 0.2
+T = 1
+n = 10000
+
+K1 = 45
+K2 = 55
+K3 = 75
+K4 = 85
+K = c(K1,K2,K3,K4)
+```
+
+##### plain Monte Carlo Methods
+```{r}
+set.seed(36)
+Z = rnorm(n)
+S = S0*exp((r-sigma^2/2)*T+sigma*sqrt(T)*Z)
+X = rep(0,n)
+v = vector()
+se = vector()
+for (k in 1:4){
+  for (i in 1:n){
+    X[i] = exp(-r*T)*max(S[i]-K[k], 0)
+  }
+  
+  v[k] = mean(X)
+  se[k] = sqrt(var(X)/n)
+}
+v
+se
+```
+
+##### control variate method and b = 1
+```{r}
+v1 = vector()
+se1 = vector()
+for (k in 1:4){
+  for (i in 1:n){
+    X[i] = exp(-r*T)*max(S[i]-K[k], 0)
+  }
+  Y = exp(-r*T)*S-S0
+  b1 = 1
+  H1 = X-b1*Y
+  v1[k] = mean(H1)
+  se1[k] = sqrt((sum(H1^2)-n*v1[k]^2)/(n*(n-1)))
+}
+v1
+se1
+
+```
+
+##### control variate method and b = b*
+```{r}
+v2 = vector()
+se2 = vector()
+for (k in 1:4){
+  for (i in 1:n){
+    X[i] = exp(-r*T)*max(S[i]-K[k], 0)
+  }
+  Y = exp(-r*T)*S-S0
+  b2 = sum((X-mean(X))*(Y-mean(Y)))/sum((Y-mean(Y))^2)
+  H2 = X-b2*Y
+  v2[k] = mean(H2)
+  se2[k] = sqrt((sum(H2^2)-n*v2[k]^2)/(n*(n-1)))
+  print(cor(X,Y))
+}
+v2
+se2
+```
+##### Comparison of the result
+```{r}
+library(ggplot2)
+
+result = data.frame(rep(K,3))
+colnames(result)='K'
+result$method = c(rep('Plain Monte Carlo',4),rep('b=1',4),rep('b=b*',4))
+result$est = c(v,v1,v2)
+result$se = c(se,se1,se2)
+
+ggplot(result, aes(x=K, y=se, group=method, color=method))+
+  geom_line()+geom_point()
+```
+
+##### Findings
+We can see that Control Variate Method with b = b* gives best result, and there is a significant reduction in standard error compared to plain Monte Carlo Method for K = 45, 55.
+
+### Example 2.2
+Use analytically tractable derivatives as control variate to estimate the price of a discretely monitored average price call option. 
+```{r}
+r = 0.05
+T = 1
+sigma = 0.2
+m = 12
+S0 = 50
+n = 10000
+t = rep(0,m)
+for (i in 1:m){
+  t[i]=i*T/m
+}
+S = rep(0,m)
+X = rep(0,n)
+K1 = 45
+K2 = 55
+K3 = 65
+K4 = 75
+K = c(K1,K2,K3,K4)
+```
+
+##### plain Monte Carlo Method
+```{r}
+v = vector()
+se = vector()
+for (j in 1:4){
+  set.seed(29)
+  for (i in 1:n){
+    for (k in 1:m){
+      Z = rnorm(1)
+      if (k==1) {
+        S[k]=S0*exp((r-0.5*sigma^2)*(t[k])+
+                      sigma*sqrt(t[k])*Z)
+       } else {
+         S[k]=S[k-1]*exp((r-0.5*sigma^2)*(t[k]-t[k-1])+sigma*sqrt(t[k]-t[k-1])*Z)
+       }
+    }
+    ari_mean = mean(S)
+    X[i] = exp(-r*T)*max(ari_mean-K[j], 0)
+  }
+  v[j] = mean(X)
+  se[j] = sqrt(var(X)/n)
+}
+v
+se
+```
+
+##### Control variates method with b=1
+```{r}
+b = 1
+geo_mean = rep(0,n)
+v1 = rep(0,4)
+se1 = rep(0,4)
+for (j in 1:4){
+  for (i in 1:n){
+    for (k in 1:m){
+      Z = rnorm(1)
+      if (k==1) {
+        S[k]=S0*exp((r-0.5*sigma^2)*(t[k])+
+                      sigma*sqrt(t[k])*Z)
+      } else {
+        S[k]=S[k-1]*exp((r-0.5*sigma^2)*(t[k]-t[k-1])+sigma*sqrt(t[k]-t[k-1])*Z)
+      }
+    }
+    ari_mean = mean(S)
+    geo_mean[i] = exp(mean(log(S)))
+    X[i] = exp(-r*T)*max(ari_mean-K[j], 0)
+  }
+  
+  Y = rep(0,n)
+  for (i in 1:n){
+    Y[i] = exp(-r*T)*max(geo_mean[i]-K[j], 0)
+  }
+  p = mean(Y)
+  H = X-b*(Y-p)
+  v1[j] = mean(H)
+  se1[j] = sqrt((sum(H^2)-n*v1[j]^2)/(n*(n-1)))
+  
+}
+v1
+se1
+
+
+```
+
+##### Control variates method with b=b*
+```{r}
+geo_mean = rep(0,n)
+v2 = vector()
+se2 = vector()
+for (j in 1:4){
+  for (i in 1:n){
+    for (k in 1:m){
+      Z = rnorm(1)
+      if (k==1) {
+        S[k]=S0*exp((r-0.5*sigma^2)*(t[k])+
+                      sigma*sqrt(t[k])*Z)
+      } else {
+        S[k]=S[k-1]*exp((r-0.5*sigma^2)*(t[k]-t[k-1])+sigma*sqrt(t[k]-t[k-1])*Z)
+      }
+    }
+    ari_mean = mean(S)
+    geo_mean[i] = exp(mean(log(S)))
+    X[i] = exp(-r*T)*max(ari_mean-K[j], 0)
+  }
+  
+  Y = rep(0,n)
+  for (i in 1:n){
+    Y[i] = exp(-r*T)*max(geo_mean[i]-K[j], 0)
+  }
+  
+  p = mean(Y)
+  b = sum((X-mean(X))*(Y-mean(Y)))/sum((Y-mean(Y))^2)
+  b
+  H = X-b*(Y-p)
+  v2[j] = mean(H)
+  se2[j] = sqrt((sum(H^2)-n*v2[j]^2)/(n*(n-1)))
+}
+v2
+se2
+```
+
+##### Comparison of the result
+```{r}
+library(ggplot2)
+
+result = data.frame(rep(K,3))
+colnames(result)='K'
+result$method = c(rep('Plain Monte Carlo',4),rep('b=1',4),rep('b=b*',4))
+result$est = c(v,v1,v2)
+result$se = c(se,se1,se2)
+
+ggplot(result, aes(x=K, y=se, group=method, color=method))+
+  geom_line()+geom_point()
+```
+
+##### Findings
+The variance deduction is very significant for both choices of b.
+
+### Example 2.3
+Estimate the price of a butterfly spread option 
+Control Variate Method: use underlying stock price as the control variate 
+```{r}
+r = 0.05
+n = 400000
+sigma = 0.2
+S0 = 50
+K1 = 45
+K2 = 50
+K3 = 55
+
+T = c(1, 0.5, 0.25) # 1, 0.5, 0.25
+```
+
+##### Plain Monte Carlo Methods
+```{r}
+set.seed(29)
+Z = rnorm(n)
+
+X = rep(0,n)
+v = vector()
+se = vector()
+for (t in 1:3){
+  S = S0*exp((r-0.5*sigma^2)*T[t]+sigma*sqrt(T[t])*Z)
+  for(i in 1:n){
+    X[i] = exp(-r*T[t])*(max(S[i]-K1,0) + max(S[i]-K3,0) - 2*max(S[i]-K2,0))
+  }
+  v[t] = mean(X)
+  se[t] = sqrt(var(X)/n)
+}
+v
+se
+```
+
+##### Control Variate Methods with b = b*
+```{r}
+v1 = vector()
+se1 = vector()
+b = vector()
+beta = vector()
+for (t in 1:3){
+  S = S0*exp((r-0.5*sigma^2)*T[t]+sigma*sqrt(T[t])*Z)
+  for(i in 1:n){
+    X[i] = exp(-r*T[t])*(max(S[i]-K1,0) + max(S[i]-K3,0) - 2*max(S[i]-K2,0))
+  }
+  Y = exp(-r*T[t])*S  # Control Variate
+  b[t] = sum((X-mean(X))*(Y-mean(Y)))/sum((Y-mean(Y))^2)
+  beta[t] = b[t]*(sqrt(var(Y)))/(sqrt(var(X)))
+  H = X-b[t]*(Y-S0)
+  v1[t] = mean(H)
+  se1[t] = sqrt((sum(H^2)-n*v1[t]^2)/(n*(n-1)))
+}
+b
+beta
+v1
+se1
+```
+
+##### Comparison of the result
+```{r}
+
+result = data.frame(rep(T,2))
+colnames(result)='T'
+result$method = c(rep('Plain Monte Carlo',3),rep('b=b*',3))
+result$est = c(v,v1)
+result$se = c(se,se1)
+library(ggplot2)
+ggplot(result, aes(x=T, y=se, group=method, color=method))+
+  geom_line()+geom_point()
+```
+
+### Example 2.4
+Control Variate Method with underlying stock price as control vaiate, to estimate the straddle price
+
+##### Plain Monte Carlo
+```{r}
+n = 10000
+T = 1
+K = c(60,70,80,90)
+sigma = 0.2
+r = 0.02
+S0 = 50
+Z = rnorm(n)
+S = S0*exp((r-0.5*sigma^2)*T+sigma*sqrt(T)*Z)
+X = rep(0,n)
+v = vector()
+se = vector()
+for (k in 1:4){
+  for (i in 1:n){
+    X[i] = exp(-r*T)*(max(S[i]-K[k], 0) + max(K[k]-S[i],0))
+  }
+  
+  v[k] = mean(X)
+  se[k] = sqrt(var(X)/n)
+}
+v
+se
+```
+
+##### Control Variate Methods
+```{r}
+v1 = vector()
+se1 = vector()
+b = vector()
+for (k in 1:4){
+  for (i in 1:n){
+    X[i] = exp(-r*T)*(max(S[i]-K[k], 0) + max(K[k]-S[i],0))
+  }
+  Y = exp(-r*T)*S-S0
+  b[k] = sum((X-mean(X))*(Y-mean(Y)))/sum((Y-mean(Y))^2)
+  H = X-b[k]*Y
+  v1[k] = mean(H)
+  se1[k] = sqrt((sum(H^2)-n*v1[k]^2)/(n*(n-1)))
+}
+b
+v1
+se1
+```
+
+##### Comparison of the result
+```{r}
+result = data.frame(rep(K,2))
+colnames(result)='K'
+result$method = c(rep('Plain Monte Carlo',4),rep('Control Variate',4))
+result$est = c(v,v1)
+result$se = c(se,se1)
+
+ggplot(result, aes(x=K, y=se, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Standard Error")
+```
+
+## Example 2.5
+To estimate a discretely monitored lookback call option with fixed strike price K and maturity T
+```{r}
+S0 = 50
+r = 0.05
+sigma = 0.2
+K = 65
+T = 1
+m =50
+n = 10000
+t = rep(0,m)
+for (i in 1:m){
+  t[i]=i*T/m
+}
+```
+
+##### plain Monte Carlo Method
+```{r}
+S = rep(0,m)
+X = rep(0,n)
+set.seed(29)
+for (i in 1:n){
+  for (k in 1:m){
+    Z = rnorm(1)
+    if (k==1) {
+      S[k]=S0*exp((r-0.5*sigma^2)*(t[k])+sigma*sqrt(t[k])*Z)
+    } else {
+      S[k]=S[k-1]*exp((r-0.5*sigma^2)*(t[k]-t[k-1])+sigma*sqrt(t[k]-t[k-1])*Z)
+    }
+  }
+  max_S = max(S)
+  X[i] = exp(-r*T)*max(max_S-K, 0)
+}
+mean(X)
+se = sqrt(var(X)/n)
+se
+```
+
+##### (i) use underlying stock price as control variate
+```{r}
+Z = rnorm(n)
+S = S0*exp((r-0.5*sigma^2)*T+sigma*sqrt(T)*Z)
+
+Y = exp(-r*T)*S-S0
+b = sum((X-mean(X))*(Y-mean(Y)))/sum((Y-mean(Y))^2)
+b   # b very small -> 0, almost no reduction in variance
+H = X-b*Y
+v = mean(H)
+v
+se2 = sqrt((sum(H^2)-n*v^2)/(n*(n-1)))
+se2
+```
+
+##### (ii) use call option with strike price K and maturity T
+```{r}
+Z = rnorm(n)
+S = S0*exp((r-sigma^2/2)*T+sigma*sqrt(T)*Z)
+Y = rep(0,n)
+for(i in 1:n){
+  Y[i] = exp(-r*T)*max(S[i]-K,0)
+}
+b = sum((X-mean(X))*(Y-mean(Y)))/sum((Y-mean(Y))^2)
+b    # b also very small
+H = X-b*(Y-S0)
+v = mean(H)
+v
+se2 = sqrt((sum(H^2)-n*v^2)/(n*(n-1)))
+se2
+```
+
+##### (iii) use geometric mean as control variate
+```{r}
+S0 = 50
+r = 0.05
+sigma = 0.2
+K = 55
+T = 1
+m =50
+n = 10000
+t = rep(0,m)
+for (i in 1:m){
+  t[i]=i*T/m
+}
+
+geo_mean = rep(0,n)
+X = rep(0,n)
+S = rep(0,m)
+set.seed(29)
+
+for (i in 1:n){
+  for (k in 1:m){
+    Z = rnorm(1)
+    if (k==1) {
+      S[k]=S0*exp((r-0.5*sigma^2)*(t[k])+sigma*sqrt(t[k])*Z)
+    } else {
+      S[k]=S[k-1]*exp((r-0.5*sigma^2)*(t[k]-t[k-1])+sigma*sqrt(t[k]-t[k-1])*Z)
+    }
+  }
+  max_S = max(S)
+  X[i] = exp(-r*T)*max(max_S-K, 0)
+  geo_mean[i] = exp(mean(log(S)))
+}
+
+Y = rep(0,n)
+for (i in 1:n){
+  Y[i] = exp(-r*T)*max(geo_mean[i]-K, 0)
+}
+
+#Y[1:100]
+p = mean(Y)
+b = sum((X-mean(X))*(Y-mean(Y)))/sum((Y-mean(Y))^2)
+b
+H = X-b*(Y-p)
+v = mean(H)
+v
+se = sqrt((sum(H^2)-n*v^2)/(n*(n-1)))
+se
+```
+
+
+## 3 Importance Sampling
+### Goal
+estimate the expected value µ= E[h(X)], X ~ f(x)  
+
+### Method
+µ = Eg[h(Y)\*f(Y)/g(Y)], where Y~g, and g is the *alternative density*. In order to preserve th unbiasness, h(Yi) is weighted by the likelihood ratio f(Yi)/g(Yi).
+
+### Guidelines for selecting g
+If g(x) = ch(x)f(x) for some constant c, then the IS estimate has 0 variance. 
+
+#### Mode Matching Method
+The mode of g(x) match the mode of h(x)f(x). Take derivative of h(x)f(x) and set it to zero. The equation can be solved numerically by the bisection method.
+
+#### Cross Entropy Method
+Try yo solve for fθ(x) that is closest to g\*(x) in the sense of *Kullback–Leibler cross entropy or relative entropy*.  
+In the event of very small probability, the *general iterative cross entropy algorithm* can be used. The method make use of N pilot sample to run for several iterations to find a suitable tilting parameter θ.
+
+
+
+### Example 3.1
+Use importance sampling to estimate the price of a binary call option.
+```{r}
+S0 = 50
+r = 0.01
+sigma = 0.1
+T = 1
+n = 10000
+
+K = c(60,70,80,100)
+b = vector()
+for (k in 1:4){
+  b[k] = (log(K[k]/S0) - (r-sigma^2/2)*T)/(sigma*sqrt(T))
+}
+
+# theoretical value
+theo = exp(-r*T)*(1-pnorm(b))
+theo
+```
+
+##### Plain Monte Carlo Methods
+```{r}
+est = vector()
+se = vector()
+re = vector()
+for (k in 1:4){
+  set.seed(29)
+  X = exp(-r*T)*(rnorm(n)>=b[k])
+  est[k] = mean(X)
+  se[k] = sqrt(var(X)/n)
+  re[k] = abs((est[k] - theo[k])/theo[k])*100
+}
+est
+se
+re
+
+```
+
+##### Importance Sampling
+```{r}
+est2 = vector()
+se2 = vector()
+re2 = vector()
+for (k in 1:4){
+  set.seed(29)
+  x = max(b[k],0)
+  H = rep(0,n)
+  for (i in 1:n){
+    Y = rnorm(1, x, 1)
+    if (Y<b[k]){
+      H[i]=0
+    } else{
+      H[i] = exp(-r*T-x*Y+x^2/2)
+    }
+  }
+  est2[k] = mean(H)
+  se2[k] = sqrt((sum(H^2)-n*est2[k]^2)/(n*(n-1)))
+  re2[k] = abs((est2[k]-theo[k])/theo[k])*100
+}
+est2
+se2
+re2
+```
+
+##### Comparison of the result
+```{r}
+result = data.frame(rep(K,2))
+colnames(result)='K'
+result$method = c(rep('Plain Monte Carlo',4),rep('IS',4))
+result$est = c(est,est2)
+result$se = c(se,se2)
+result$re = c(re,re2)
+library(ggplot2)
+p1 = ggplot(result, aes(x=K, y=se, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Standard Error")
+p2 = ggplot(result, aes(x=K, y=re, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Relative Error")
+require(gridExtra)
+grid.arrange(p1,p2)
+```
+
+##### Comments
+Plain Monte Carlo performs bad when K becomes larger because with a moderate sample size, only a few or even none of the samples will reach the strike price K. IS method produce quite accurate result even when K is large.
+
+### Example 3.2
+Use importance sampling to estimate the price of a call option. Use Mode Matching Method to find theta for the alternative distribution.
+```{r}
+S0 = 50
+r = 0.05
+sigma = 0.2
+T = 1
+n = 10000
+
+K = c(60,80,100,120)
+theta = vector()
+theo = vector()
+# theoretical value by using Black-Scholes formula
+for (k in 1:4){
+  theta[k] = 1/(sigma*sqrt(T))*log(K[k]/S0)+(sigma/2-r/sigma)*sqrt(T)
+  theo[k] = S0*pnorm(sigma*sqrt(T)-theta[k])-K[k]*exp(-r*T)*pnorm(-theta[k])
+}
+theo
+```
+
+##### plain Monte Carlo
+```{r}
+set.seed(29)
+X = rnorm(n)
+for (k in 1:4){
+  h = S0*exp(-0.5*sigma^2*T+sigma*sqrt(T)*X)-exp(-r*T)*K[k]
+  for (i in 1:n){
+    h[i] = max(0, h[i])
+  }
+  est[k] = mean(h)
+  se[k] = sqrt(var(h)/n)
+}
+re = abs((est-theo)/theo*100)
+est
+se
+re
+```
+
+##### Importance Sampling
+```{r}
+# find x* using bisection method
+f <- function(x){
+  S0*exp(-0.5*sigma^2*T+sigma*sqrt(T)*x)*(sigma*sqrt(T)-x)+exp(-r*T)*K[4]*x
+}
+
+#f(4)
+#f(5)
+
+x1= vector()
+x2 = vector()
+x1[1] = 1
+x2[1] = 2
+x1[2] = 2
+x2[2] = 3
+x1[3] = 3
+x2[3] = 4
+x1[4] = 4
+x2[4] = 5
+
+for(k in 1:4){
+  while (abs(x1[k]-x2[k])>=1e-6){
+    x = (x1[k]+x2[k])/2
+    if (f(x)==0){
+      x1[k] = x
+      x2[k] = x
+    } else {
+      if ((f(x)>0 & f(x1[k])>0)|(f(x)<0 & f(x1[k])<0)){
+        x1[k] = x
+      } else {
+        x2[k] = x
+      }
+    }
+  }
+}
+x1
+
+
+# importance sampling
+est1 = vector()
+se1 = vector()
+set.seed(29)
+for (k in 1:4){
+  H = rep(0,n)
+  Y = rnorm(n,x1[k],1)
+  h = S0*exp(-0.5*sigma^2*T+sigma*sqrt(T)*Y)-exp(-r*T)*K[k]
+  for (i in 1:n){
+    H[i] = max(0, h[i])*exp(-x1[k]*Y[i] + (x1[k])^2/2)
+  }
+  est1[k] = mean(H)    ## when K is large, this value is very unstable for diff seeds
+  se1[k] = sqrt((sum(H^2)-n*est1[k]^2)/(n*(n-1)))
+}
+est1
+se1
+re1 = abs((est1-theo)/theo)*100
+re1
+```
+
+##### Comparison of the result
+```{r}
+result = data.frame(rep(K,2))
+colnames(result)='K'
+result$method = c(rep('Plain Monte Carlo',4),rep('IS',4))
+result$est = c(est,est1)
+result$se = c(se,se1)
+result$re = c(re,re1)
+
+p1 = ggplot(result, aes(x=K, y=se, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Standard Error")
+p2 = ggplot(result, aes(x=K, y=re, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Relative Error")
+require(gridExtra)
+grid.arrange(p1,p2)
+```
+##### Comments
+Plain Monte Carlo performs bad when K becomes larger. IS method performe much better especially when K is large.
+
+
+## 3.2 The Cross Entropy Method
+### Example 3.3
+Estimate the price of a call option, using cross entropy method to find the tilting theta.
+```{r, eval=FALSE}
+
+S0 = 50
+r = 0.05
+sigma = 0.2
+T = 1
+N = 2000
+n = 10000
+
+K = c(60,80,100,120) 
+set.seed(29)
+
+est2 = vector()
+se2 = vector()
+for (k in 1:2){
+  X = rnorm(N)
+  h <- function(x){
+    max(S0*exp(-0.5*sigma^2*T+sigma*sqrt(T)*x)-exp(-r*T)*K[k], 0)
+  }
+  hx = rep(0,N)
+  for(i in 1:N){
+    hx[i] = h(X[i])
+  }
+
+  theta_hat = sum(hx*X)/sum(hx)
+  H = rep(0,n)
+  for(i in 1:n){
+    Y = rnorm(1,theta_hat,1)
+    H[i] = h(Y)*exp(-theta_hat*Y + theta_hat^2/2)
+  }
+  est2[k] = mean(H)
+  se2[k] = sqrt((sum(H^2)-n*est2[k]^2)/(n*(n-1)))
+}
+est2 #when K is large, say 100, produce a lot of NaN
+se2
+re2 = abs((est2-theo)/theo)*100
+re2
+```
+
+##### Comment
+When K is large, say larger than 100, the basic entropy method produces a lot of NaN. It is because in the estimation of theta_hat, almost all h(X) is 0. A modification(iterative scheme) of the basic method is needed.
+
+
+Using Iterative cross-entropy scheme to resolve the rare event issue in the example
+```{r}
+S0 = 50
+r = 0.05
+sigma = 0.2
+T = 1
+N = 2000
+K = c(60,80,100,120)
+
+theta_hat0 = vector()
+for (k in 1:4){
+  theta_hat0[k] = 1/(sigma*sqrt(T))*log(K[k]/S0)-r/sigma*sqrt(T)
+}
+
+theta_hat0
+IT_NUM = 5
+theta_hat_final = vector()
+
+for (k in 1:4){
+  h <- function(x){
+    max(S0*exp(-0.5*sigma^2*T+sigma*sqrt(T)*x)-exp(-r*T)*K[k], 0)
+  }
+  
+  H = rep(0,N)
+  theta_hat = rep(0, IT_NUM+1)
+  theta_hat[1] = theta_hat0[k]
+  set.seed(29)
+  for(j in 1:IT_NUM+1){
+    Y = rnorm(N,theta_hat[j-1],1)
+    for(i in 1:N){
+      H[i] = h(Y[i])
+    }
+    theta_hat[j] = sum(H*exp(-theta_hat[j-1]*Y)*Y)/sum(H*exp(-theta_hat[j-1]*Y))
+  }
+  
+  theta_hat
+  theta_hat_final[k] = theta_hat[IT_NUM+1]
+}
+theta_hat_final
+
+
+H = rep(0,n)
+est3 = vector()
+se3 = vector()
+for (k in 1:4){
+  for (i in 0:n){
+    Y = rnorm(1, theta_hat_final[k], 1)
+    H[i] = h(Y)*exp(-theta_hat_final[k]*Y + theta_hat_final[k]^2/2)
+  }
+  est3[k] = mean(H)    
+  se3[k] = sqrt((sum(H^2)-n*est3[k]^2)/(n*(n-1)))
+}
+est3  # works well even when K is large, like 120\
+se3
+re3 = abs((est3-theo)/theo)*100
+re3
+```
+
+##### Comparison of the result
+```{r}
+result = data.frame(rep(K,3))
+colnames(result)='K'
+result$method = c(rep('Plain Monte Carlo',4),rep('IS_mode matching',4),rep('IS_iterative cross entropy',4))
+result$est = c(est,est1,est3)
+result$se = c(se,se1,se3)
+result$re = c(re,re1,se3)
+library(ggplot2)
+library(gridExtra)
+p1 = ggplot(result, aes(x=K, y=se, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Standard Error")
+p2 = ggplot(result, aes(x=K, y=re, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Relative Error")
+grid.arrange(p1,p2)
+```
+##### Comment
+Iterative Cross Entropy Method also works well when K is large.
+
+
+### Example 3.3(2)
+Estimate the call option price, with cross entropy method(same as Example 3.2). Use another method to initialize the tilitng parameter.
+```{r}
+rho = 0.1
+N = 2000
+N0 = 1800
+S0 = 50
+r = 0.05
+sigma = 0.2
+T = 1
+K = 120
+alpha = K
+theta_0 = 0
+j = 0
+
+F <- function(x){
+  S0*exp((r-0.5*sigma^2)*T+sigma*sqrt(T)*x)
+}
+
+H <- function(x, alpha){
+  exp(-r*T)*max(F(x)-alpha, 0)
+}
+
+theta = vector()
+theta[1] = theta_0
+j=0
+H_vector = rep(0,N)
+
+alpha_j = 40
+while (alpha_j<alpha){
+  j = j+1
+  Y = rnorm(N, theta[j],1)
+  V = F(Y)
+  V = sort(V)
+  alpha_j = V[N0]
+  for(i in 1:N){
+    if ( F(Y[i])>=alpha_j ){
+      H_vector[i]=H(Y[i], alpha_j)
+    } else {
+      H_vector[i]=0
+    }
+  }
+  theta[j+1]= sum(H_vector*exp(-theta[j]*Y)*Y)/sum(H_vector*exp(-theta[j]*Y))
+}
+
+theta
+alpha_j
+final_theta = theta[j+1]
+H = rep(0,n)
+h <- function(x){
+  max(S0*exp(-0.5*sigma^2*T+sigma*sqrt(T)*x)-exp(-r*T)*K, 0)
+}
+for (i in 0:n){
+  Y = rnorm(1, final_theta, 1)
+  H[i] = h(Y)*exp(-final_theta*Y + final_theta^2/2)
+}
+est_v = mean(H)
+est_v     # works well even when K is large, like 120
+se = sqrt((sum(H^2)-n*est_v^2)/(n*(n-1)))
+se
+```
+##### Comment
+An alternative way for initializing the parameter for very rare event. In the example, work well when K is large.
+
+
+### Example 3.4
+Iterative cross-entropy method for estimating the price of binary option
+```{r}
+S0 = 50
+r = 0.01
+sigma = 0.1
+T = 1
+n = 10000
+N = 2000
+IT_NUM = 5
+
+K = c(60, 70, 80, 100)
+b = vector()
+theo = vector()
+for (k in 1:4){
+  b[k] = (log(K[k]/S0) - (r-sigma^2/2)*T)/(sigma*sqrt(T))
+}
+
+# theoretical value
+theo = exp(-r*T)*(1-pnorm(b))
+theo
+```
+
+##### Plain Monte Carlo Methods (Same as Example 3.1)
+```{r}
+est = vector()
+se = vector()
+re = vector()
+for (k in 1:4){
+  set.seed(29)
+  X = exp(-r*T)*(rnorm(n)>=b[k])
+  est[k] = mean(X)
+  se[k] = sqrt(var(X)/n)
+  re[k] = abs((est[k] - theo[k])/theo[k])*100
+}
+est
+se
+re
+```
+
+```{r}
+# initialize theta_hat0 so that exp(-rT)*E[I{Y>=b}]=0
+theta_hat_final = vector()
+for (k in 1:4){
+  theta_hat0 = b[k]
+  H = rep(0,N)
+  theta_hat = rep(0, IT_NUM+1)
+  theta_hat[1] = theta_hat0
+  
+  set.seed(29)
+  h <- function(X){
+    exp(-r*T)*(X>=b[k])
+  }
+  for(j in 1:IT_NUM+1){
+    Y = rnorm(N,theta_hat[j-1],1)
+    for(i in 1:N){
+      H[i] = h(Y[i])
+    }
+    theta_hat[j] = sum(H*exp(-theta_hat[j-1]*Y)*Y)/sum(H*exp(-theta_hat[j-1]*Y))
+  }
+  theta_hat_final[k] = theta_hat[IT_NUM+1]
+}
+theta_hat_final
+
+H = rep(0,n)
+for (k in 1:4){
+  for (i in 0:n){
+    Y = rnorm(1, theta_hat_final[k], 1)
+    H[i] = h(Y)*exp(-theta_hat_final[k]*Y + theta_hat_final[k]^2/2)
+  }
+  est1[k] = mean(H)
+  se1[k] = sqrt((sum(H^2)-n*est1[k]^2)/(n*(n-1)))
+}
+est1
+se1
+re1 = abs((est1 - theo)/theo)*100
+re1
+```
+
+##### Comparison of the result
+```{r}
+result = data.frame(rep(K,2))
+colnames(result)='K'
+result$method = c(rep('Plain Monte Carlo',4),rep('IS',4))
+result$est = c(est,est1)
+result$se = c(se,se1)
+result$re = c(re,re1)
+
+p1 = ggplot(result, aes(x=K, y=se, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Standard Error")
+p2 = ggplot(result, aes(x=K, y=re, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Relative Error")
+grid.arrange(p1,p2)
+```
+
+### Exercise 3.A
+estimate P(X>=b) with Importance Sampling
+#### (a) X~Bin(m,p), b = m*a, p<a<1; g(x)~bin(m,a)
+Comment: the theoretical value seems to be too small for comparing. Also, relative errors are quite large for both methods
+```{r}
+plain_est=vector()
+plain_se=vector()
+plain_re=vector()
+IS_est = vector()
+IS_se = vector()
+IS_re = vector()
+m_vec = c(10,20,30)
+theo = vector()
+for (k in 1:length(m_vec)){
+  p = 0.5
+  a = 0.9
+  m = m_vec[k] #10,100,1000
+  n = 10000
+  b = m*a
+  theo[k] = 1-pbinom(b,m,p)
+  ##### Plain Monte Carlo Methods #####
+  set.seed(18)
+  X = rbinom(n,m,p)
+  count = vector()
+  for (i in 1:n){
+    if (X[i]>=b){
+      count[i] = 1
+    } else {
+      count[i] = 0
+    }
+  }
+  plain_est[k] = mean(count)
+  plain_se[k] = sqrt(var(count)/n)
+  plain_re[k] = abs((plain_est[k]-theo[k])/theo[k])*100
+  
+  ##### Importance Sampling #####
+  Y = rbinom(n,m,a)
+  count2 = vector()
+  for (i in 1:n){
+    if (Y[i]>=b){
+      count2[i]=1*0.5^m/(a^Y[i]*(1-a)^(m-Y[i]))
+    } else{
+      count2[i]=0
+    }
+  }
+  
+  IS_est[k] = mean(count2)
+  IS_se[k] = sqrt((sum(count2^2)-n*IS_est[k]^2)/(n*(n-1)))
+  IS_re[k] = abs((IS_est[k]-theo[k])/theo[k])*100
+}
+
+theo
+plain_est
+IS_est
+```
+
+##### Comparing the result
+```{r}
+result = data.frame(rep(m_vec,2))
+colnames(result)='m'
+result$method = c(rep('Plain Monte Carlo',3),rep('IS',3))
+result$est = c(plain_est,IS_est)
+result$se = c(plain_se,IS_se)
+result$re = c(plain_re,IS_re)
+library(ggplot2)
+library(gridExtra)
+p1 = ggplot(result, aes(x=m, y=se, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Standard Error")
+p2 = ggplot(result, aes(x=m, y=re, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Relative Error")
+grid.arrange(p1,p2)
+```
+
+#### (b) X~exp(lambda),b=a/lambda, alternative distribution~exp(1/b)
+```{r}
+plain_est=vector()
+plain_se=vector()
+plain_re=vector()
+IS_est = vector()
+IS_se = vector()
+IS_re = vector()
+a_vec = c(2,5,10,20,30)
+theo = vector()
+
+for (k in 1:length(a_vec)){
+  lambda = 1
+  a = a_vec[k] #2,5,10
+  n = 10000
+  b = a/lambda
+  
+  theo[k] = 1-pexp(b,lambda)
+
+  ##### Plain Monte Carlo Methods #####
+  set.seed(29)
+  X = rexp(n,lambda)
+  count = vector()
+  for (i in 1:n){
+    if (X[i]>=b){
+      count[i] = 1
+    } else {
+      count[i] = 0
+    }
+  }
+  plain_est[k] = mean(count)
+  plain_se[k] = sqrt(var(count)/n)
+  plain_re[k] = abs((plain_est[k]-theo[k])/theo[k])*100
+  
+  ##### Importance Sampling #####
+  Y = rexp(n,1/b)
+  H = rep(0,n)
+  for (i in 1:n){
+    if (Y[i]>=b){
+      H[i]=1*lambda*b*exp(-lambda*Y[i]+1/b*Y[i])
+    } else{
+      H[i]=0
+    }
+  }
+
+  IS_est[k] = mean(H)
+  IS_se[k] = sqrt((sum(H^2)-n*IS_est[k]^2)/(n*(n-1)))
+  IS_re[k] = abs((IS_est[k]-theo[k])/theo[k])*100
+}
+
+```
+
+##### Comparing the result
+```{r}
+result = data.frame(rep(a_vec,2))
+colnames(result)='m'
+result$method = c(rep('Plain Monte Carlo',5),rep('IS',5))
+result$est = c(plain_est,IS_est)
+result$se = c(plain_se,IS_se)
+result$re = c(plain_re,IS_re)
+
+p1 = ggplot(result, aes(x=m, y=se, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Standard Error")
+p2 = ggplot(result, aes(x=m, y=re, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Relative Error")
+grid.arrange(p1,p2)
+```
+
+
+### Exercise 3.B estimate P(X>=b)
+##### Plain Monte Carlo Methods
+```{r}
+n = 10000
+set.seed(29)
+X = rnorm(n)
+Y = rnorm(n)
+Z = rnorm(n)
+b = 3
+# let A = min{X+Y,Y+2Z+1}
+count = vector()
+for (i in 1:n){
+  if(min(X[i]+Y[i],Y[i]+2*Z[i]+1)>=b){
+    count[i]=1
+  } else {
+    count[i]=0
+  }
+} 
+plain_est = mean(count)
+plain_est
+plain_se = sqrt(var(count)/n)
+plain_se
+```
+##### Basic Cross Entropy Scheme for IS
+```{r}
+N = 2000
+set.seed(29)
+X = rnorm(N)
+Y = rnorm(N)
+Z = rnorm(N)
+A = rep(0,N)
+h = rep(0,N)
+
+for (i in 1:N){
+  A[i]=min(X[i]+Y[i],Y[i]+2*Z[i]+1)
+  if(A[i]>=b){
+    h[i]=1
+  } else {
+    h[i]=0
+  }
+}
+
+theta_est = vector()
+theta_est[1] = sum(h*X)/sum(h)
+theta_est[2] = sum(h*Y)/sum(h)
+theta_est[3] = sum(h*Z)/sum(h)
+
+X2 = rnorm(n,theta_est[1],1)
+Y2 = rnorm(n,theta_est[2],1)
+Z2 = rnorm(n,theta_est[3],1)
+A2 = rep(0,n)
+
+#theta_est
+
+for (i in 1:n){
+  A2[i]=min(X2[i]+Y2[i],Y2[i]+2*Z2[i]+1)
+}
+
+l = exp(-theta_est[1]*X2+1/2*theta_est[1]^2
+    -theta_est[2]*Y2+1/2*theta_est[2]^2
+    -theta_est[3]*Z2+1/2*theta_est[3]^2)
+
+H = (A2>=b)*l
+IS_est = mean(H)
+IS_est
+IS_se = sqrt((sum(H^2)-n*IS_est^2)/(n*(n-1)))
+IS_se
+
+```
+### Comment
+Basic Monte Carlo method does not work for b=5, probably because almost all h = 0 and it produce NA when calculating estimated theta.
+
+
+### Exercise 3.C Mode Matching Method to estimate the price of a put option via importance sampling
+```{r}
+r = 0.1
+sigma = 0.2
+T = 1
+K = 30
+n = 10000
+S0 = c(30,50,70,90)
+
+# theoretical value by using Black-Scholes formula
+theta = 1/(sigma*sqrt(T))*log(K/S0)+(sigma/2-r/sigma)*sqrt(T)
+theo = K*exp(-r*T)*pnorm(theta)-S0*pnorm(theta-sigma*sqrt(T))
+theo
+```
+
+##### Plain Monte Carlo Methods
+```{r}
+set.seed(29)
+for (s in 1:4){
+  X = rnorm(n)
+  h = exp(-r*T)*K-S0[s]*exp(-0.5*sigma^2*T+sigma*sqrt(T)*X)
+  for (i in 1:n){
+    h[i] = max(0, h[i])
+  }
+  est[s] = mean(h)
+  se[s] = sqrt(var(h)/n)
+}
+est
+se
+re = abs((est-theo)/theo*100)
+re
+```
+
+##### Importance Sampling with Mode Matching
+```{r}
+# find x* using bisection method
+f <- function(x){
+  -S0[1]*exp(-0.5*sigma^2*T+sigma*sqrt(T)*x)*(sigma*sqrt(T)-x)-exp(-r*T)*K*x
+}
+
+f(-1)
+f(-2)
+
+x1 = c(-1, -3, -4, -6)
+x2 = c(-2, -4, -5, -7)
+
+for (s in 1:4){
+  while (abs(x1[s]-x2[s])>=1e-6){
+    x = (x1[s]+x2[s])/2
+    if (f(x)==0){
+      x1[s] = x
+      x2[s] = x
+    } else {
+      if ((f(x)>0 & f(x1[s])>0)|(f(x)<0 & f(x1[s])<0)){
+        x1[s] = x
+      } else {
+        x2[s] = x
+      }
+    }
+  }
+}
+x1
+
+#importance sampling
+set.seed(29)
+H = rep(0,n)
+for (s in 1:4){
+  Y = rnorm(n,x1[s],1)
+  h = exp(-r*T)*K - S0[s]*exp(-0.5*sigma^2*T+sigma*sqrt(T)*Y)
+  for (i in 1:n){
+    H[i] = max(0, h[i])*exp(-x1[s]*Y[i] + (x1[s])^2/2)
+  }
+  est1[s] = mean(H)
+  se1[s] = sqrt((sum(H^2)-n*est1[s]^2)/(n*(n-1)))
+}
+est1
+se1
+re1 = abs((est1-theo)/theo)*100
+re1
+```
+
+### Exercise 3.D Use iterative cross-entropy method for 3.C
+```{r}
+N =2000
+IT_NUM = 5
+
+set.seed(29)
+for (s in 1:4){
+  
+  # to initialize theta_hat0 s.t. E(h(Y)) = 0
+  theta_hat0 = 1/(sigma*sqrt(T))*log(K/S0[s])-r/sigma*sqrt(T)
+  theta_hat0
+  
+  h <- function(x){
+    max(exp(-r*T)*K-S0[s]*exp(-0.5*sigma^2*T+sigma*sqrt(T)*x), 0)
+  }
+  
+  H = rep(0,N)
+  theta_hat = rep(0, IT_NUM+1)
+  theta_hat[1] = theta_hat0
+  
+  for(j in 1:IT_NUM+1){
+    Y = rnorm(N,theta_hat[j-1],1)
+    for(i in 1:N){
+      H[i] = h(Y[i])
+    }
+    theta_hat[j] = sum(H*exp(-theta_hat[j-1]*Y)*Y)/sum(H*exp(-theta_hat[j-1]*Y))
+  }
+  theta_hat
+  theta_hat_final = theta_hat[IT_NUM+1]
+  theta_hat_final
+  
+  H = rep(0,n)
+  for (i in 0:n){
+    Y = rnorm(1, theta_hat_final, 1)
+    H[i] = h(Y)*exp(-theta_hat_final*Y + theta_hat_final^2/2)
+  }
+  est2[s] = mean(H)
+  se2[s] = sqrt((sum(H^2)-n*est2[s]^2)/(n*(n-1)))
+}
+est2
+se2
+re2 = abs((est2-theo)/theo)*100
+re2
+```
+
+##### Comparison of the result
+```{r}
+result = data.frame(rep(S0,3))
+colnames(result)='S0'
+result$method = c(rep('Plain Monte Carlo',4),rep('IS_mode matching',4),rep('IS_iterative cross entropy',4))
+result$est = c(est,est1,est2)
+result$se = c(se,se1,se2)
+result$re = c(re,re1,se2)
+library(ggplot2)
+library(gridExtra)
+p1 = ggplot(result, aes(x=S0, y=se, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Standard Error")
+p2 = ggplot(result, aes(x=S0, y=re, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Relative Error")
+grid.arrange(p1,p2)
+```
+
+## 4 Euler Scheme
+
+### Example 4.2
+Method of conditioning
+```{r}
+S0 = 50
+r0 = 0.04
+b = 0.06
+a = 1
+theta = 0.1
+sigma = 0.2
+T = 1
+rho = 0.8
+m = 50
+n = 10000
+K = 55   # K= 45, 50, 55
+t = (0:m)*T/m
+```
+
+##### Plain Monte Carlo Methods with Euler Scheme
+```{r}
+S = vector()
+r = vector()
+S[1] = S0
+r[1] = r0
+H = vector()
+
+sigma_mat = matrix(c(1,rho,rho,1),nrow = 2)
+library(MASS)
+
+for (k in 1:n){
+  for (i in 1:m){
+    data = mvrnorm(1, rep(0, 2), sigma_mat)
+    Z = data[1] 
+    Y = data[2]
+    S[i+1] = S[i]+r[i]*S[i]*(t[i+1]-t[i])+sigma*S[i]*sqrt(t[i+1]-t[i])*Z
+    r[i+1] = r[i]+a*(b-r[i])*(t[i+1]-t[i])+theta*sqrt(r[i])*sqrt(t[i+1]-t[i])*Y
+  }
+  R = 0
+  for (i in 1:m+1){
+    R = R + (t[i]-t[i-1])*r[i-1]
+  }
+  
+  R = R/T
+  H[k] = exp(-R*T)*max(S[m+1]-K,0)
+}
+
+est = mean(H)
+est
+se = sqrt(var(H)/n)
+se
+```
+
+##### Euler scheme and method of conditioning
+```{r}
+r = vector()
+H = vector()
+set.seed(29)
+for (k in 1:n){
+  r[1] = r0
+  L = 0
+  for (i in 1:m){
+    Y = rnorm(1)
+    r[i+1] = r[i] + a*(b-r[i])*(t[i+1]-t[i]) +theta*sqrt(r[i])*sqrt(t[i+1]-t[i])*Y
+    L = L+sqrt(t[i+1]-t[i])*Y
+  }
+  Bt = L
+  R = 0
+  for (i in 1:m+1){
+    R = R + (t[i]-t[i-1])*r[i-1]
+  }
+  R = R/T
+  X0 = S0*exp(rho*sigma*Bt-rho^2*sigma^2*T/2)
+  Z = rnorm(1)
+  Z = rnorm(100)
+  
+  v = vector()
+  St = X0*exp((R-1/2*sigma^2*(1-rho^2))*T + sigma*sqrt(1-rho^2)*Z)
+  for (i in 1:100){
+    v[i] = exp(-R*T)*max(St[i]-K,0)
+  }
+  C = mean(v)
+  
+  #not sure about this Qt=Z
+  H[k] = C
+}
+
+est = mean(H)
+est
+est_se = sqrt((sum(H^2)-n*est^2)/(n*(n-1)))
+est_se  
+```
+
+
+
+### Example 4.3
+Control Variate Method & Euler Scheme
+```{r}
+r = 0.05
+S0 = 50
+K = 50
+a = 3
+beta = 0.1
+theta0 = 0.25
+T = 1
+big_theta = 0.2
+rho = 0.5
+m = 50
+t = (0:m)*T/m
+n = 10000
+```
+
+##### Plain Monte Carlo Methods
+```{r}
+Y = vector()
+theta = vector()
+
+sigma_mat = matrix(c(1,rho,rho,1),nrow = 2)
+
+X = vector()
+Y_trace = vector()
+for (k in 1:n){
+  Y[1] = log(S0)
+  theta[1] = theta0
+  normal_v = mvrnorm(m, rep(0, 2), sigma_mat)
+  Z = normal_v[,1]
+  R = normal_v[,2]
+  for (i in 1:m){
+    Y[i+1] = Y[i]+(r-1/2*theta[i]^2)*(t[i+1]-t[i])+theta[i]*sqrt(t[i+1]-t[i])*Z[i]
+    theta[i+1] = theta[i]+a*(big_theta-theta[i])*(t[i+1]-t[i])+beta*sqrt(t[i+1]-t[i])*R[i]
+  } 
+  Y_trace[k] = Y[m+1]
+  X[k] = exp(-r*T)*max(exp(Y[m+1])-K,0)
+}
+#X[1:100]
+plain_est = mean(X)
+plain_est
+plain_se = sqrt(var(X)/n)
+plain_se
+
+```
+
+
+##### Control Variate Method
+```{r}
+sigma = big_theta
+Y_hat = vector()
+Y_l = vector()
+theta = vector()
+X = vector()
+Q = vector()
+
+set.seed(29)
+## Calculate BLS_Call
+Z = rnorm(n)
+
+v = vector()
+St = S0*exp((r-0.5*sigma^2)*T+sigma*sqrt(T)*Z)
+for (i in 1:n){
+  v[i] = exp(-r*T)*max(St[i]-K,0)
+}
+C = mean(v)
+
+for (k in 1:n){
+  Y_hat[1] = log(S0)
+  Y_l[1] = log(S0)
+  theta[1] = theta0
+  for (i in 1:m){
+    Z = rnorm(1)
+    U = rnorm(1)
+    R = rho*Z+sqrt(1-rho^2)*U
+    Y_hat[i+1] = Y_hat[i]+(r-theta[i]^2/2)*(t[i+1]-t[i])+theta[i]*sqrt(t[i+1]-t[i])*Z
+    Y_l[i+1] = Y_l[i]+(r-sigma^2/2)*(t[i+1]-t[i])+sigma*sqrt(t[i+1]-t[i])*Z
+    theta[i+1] = theta[i]+a*(big_theta-theta[i])*(t[i+1]-t[i])+beta*sqrt(t[i+1]-t[i])*R
+    
+  }
+  X[k] = exp(-r*T)*max(exp(Y_hat[m+1])-K,0)
+  Q[k] = exp(-r*T)*max(exp(Y_l[m+1])-K,0)-C
+}
+
+b_optimal = sum((X-mean(X))*(Q-mean(Q)))/sum((Q-mean(Q))^2)
+b_optimal
+
+
+H = X-b_optimal*Q
+
+v_est = mean(H)
+v_est
+se_est = sqrt((sum(H^2)-n*v_est^2)/(n*(n-1)))
+se_est
+```
+##### Comments
+After using Control Variate Method with euler scheme, the standard error is much less than plain euler scheme.
+
+
+
+### Example 4.4 Importance Sampling with Euler Scheme
+Estimate the price of a put option, where the stock price is a CEV process under risk-neutral probability method.
+
+```{r}
+S0=50
+r=0.05
+sigma=0.2
+T=1
+m=50
+n=10000
+N=2000
+K = c(50,52,55)
+t = (0:m)*T/m
+```
+
+##### Plain Monte Carlo method
+```{r}
+X = vector()
+XT = vector()
+h = vector()
+plain_est = vector()
+plain_se = vector()
+set.seed(29)
+for (j in 1:3){
+  for (k in 1:n){
+    X[1] = S0
+    for (i in 1:m){
+      Z = rnorm(1)
+      X[i+1] = max(0, X[i]+sigma*exp(-r*1/2*t[i])*sqrt(X[i])*sqrt(t[i+1]-t[i])*Z)
+    }
+    XT[k] = X[m+1]
+    h[k] = max(exp(-r*T)*K[j]-XT[k],0)
+  }
+  
+  plain_est[j] = mean(h)
+  plain_se[j] = sqrt(var(h)/n)
+}
+plain_est
+plain_se
+```
+
+
+##### Basic Cross-entropy method
+```{r}
+IS_est = vector()
+IS_se =vector()
+for (j in 1:3){
+  Y = matrix(0,nrow = N,ncol = m)
+  set.seed(29)
+  theta = vector()
+  for (k in 1:N){
+    for(i in 1:m){
+      Y[k,i] = rnorm(1)
+    }
+  }
+  X = vector()
+  h = vector()
+  for (k in 1:N){
+    X[1]= S0
+    for (i in 1:m){
+      X[i+1] = max(0, X[i]+sigma*exp(-r*1/2*t[i])*sqrt(X[i])*sqrt(t[i+1]-t[i])*Y[k,i])
+      }
+    h[k] = max(exp(-r*T)*K[j]-X[m+1],0)
+  }
+  
+  denom = rep(0,m)
+  for (i in 1:N){
+    denom = denom+h[i]*Y[i,]
+  }
+  theta = denom/sum(h)
+  theta
+  
+  H = vector()
+  for (k in 1:n){
+    Z = vector()
+    for (i in 1:m){
+      Z[i] = rnorm(1, theta[i],1)
+      X[i+1] = max(0, X[i]+sigma*exp(-r*(1/2)*t[i])*sqrt(X[i])*sqrt(t[i+1]-t[i])*Z[i])
+    }
+    H[k] = max(exp(-r*T)*K[j]-X[m+1],0)*exp(-sum(theta*Z)+0.5*sum(theta^2))
+  }
+  
+  
+  IS_est[j] = mean(H)
+  IS_se[j] = sqrt((sum(H^2)-n*IS_est[j]^2)/(n*(n-1)))
+}
+IS_est
+IS_se
+```
+
+##### Comparison of the result
+```{r}
+result = data.frame(rep(K,2))
+colnames(result)='K'
+result$method = c(rep('Plain Monte Carlo',3),rep('Importance Sampling',3))
+result$est = c(plain_est,IS_est)
+result$se = c(plain_se, IS_se)
+library(ggplot2)
+library(gridExtra)
+p1 = ggplot(result, aes(x=K, y=est, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Estimation")
+p2 = ggplot(result, aes(x=K, y=se, group=method, color=method))+
+  geom_line()+geom_point()+ggtitle("Comparison of Standard Error")
+grid.arrange(p1,p2)
+```
+
+### Exercise 4.A Euler Scheme to approximate XT, suppose X is a geometric Brownian motion with drift r and volatility σ 
+```{r}
+r = 0.12
+sigma = 0.2
+T = 1
+X0 = 50
+n = 10000
+m_vec = c(5,10,20,40,60,80,100)
+
+error = vector()
+h_vec = vector()
+for (k in 1:length(m_vec)){
+  m = m_vec[k]
+  m
+  t = vector()
+  h_vec[k] = T/m
+  t = (0:m)*h_vec[k]
+  set.seed(29)
+  
+  final_est = vector()
+  final_real = vector()
+  for (j in 1:n){
+    X_est = vector()
+    X_est[1] = X0
+    X_real = vector()
+    X_real[1] = X0
+    for (i in 1:m+1){
+      Z = rnorm(1)
+      X_est[i] = X_est[i-1]+r*X_est[i-1]*h_vec[k]+sigma*X_est[i-1]*sqrt(h_vec[k])*Z
+      X_real[i] =X_real[i-1]*exp((r-0.5*sigma^2)*h_vec[k]+sigma*sqrt(h_vec[k])*Z)
+    }
+    final_est[j] = X_est[m+1]
+    final_real[j] = X_real[m+1]
+  }
+  error[k] = mean(abs(final_est-final_real))
+}
+error
+```
+
+##### Visualize the error
+```{r}
+result = data.frame(h_vec)
+colnames(result)='h'
+result$error = error
+library(ggplot2)
+p1 = ggplot(result, aes(x=h, y=error))+
+  geom_line()+geom_point()+ggtitle("Error versus step size h")
+p2 = ggplot(result, aes(x=log(h), y=log(error)))+
+  geom_line()+geom_point()+ggtitle("Log Error versus log step size h")
+library(gridExtra)
+grid.arrange(p1,p2, ncol=2)
+```
+
+
+### Exercise 4.B Importance Sampling and cross-entropy method for estimating the call option with the underlying stock following a CEV process.
+```{r}
+S0 = 50
+r = 0.05
+sigma = 0.2
+T = 1
+m = 50
+n = 10000
+N = 2000
+t = (0:m)*T/m
+gamma = 0.5
+K = 50
+
+```
+
+##### Plain Monte Carlo Methods
+```{r}
+X = vector()
+XT = vector()
+h = vector()
+set.seed(35)
+for (k in 1:n){
+  X[1] = S0
+  for (i in 1:m){
+    Z = rnorm(1)
+    X[i+1] = max(0, X[i]+sigma*exp(-r*(1-gamma)*t[i])*X[i]^gamma*sqrt(t[i+1]-t[i])*Z)
+  }
+  XT[k] = X[m+1]
+  h[k] = max(XT[k]-exp(-r*T)*K,0)
+}
+
+plain_est = mean(h)
+plain_est
+plain_se = sqrt(var(h)/n)
+plain_se
+
+```
+
+##### Importance Sampling with Basic Cross-entropy method
+```{r}
+Y = matrix(0,nrow = N,ncol = m)
+set.seed(35)
+theta = vector()
+for (k in 1:N){
+  for(i in 1:m){
+    Y[k,i] = rnorm(1)
+  }
+}
+X = vector()
+h = vector()
+for (k in 1:N){
+  X[1]= S0
+  for (i in 1:m){
+    X[i+1] = max(0, X[i]+sigma*exp(-r*(1-gamma)*t[i])*X[i]^gamma*sqrt(t[i+1]-t[i])*Y[k,i])
+    }
+  h[k] = max(X[m+1]-exp(-r*T)*K,0)
+}
+
+denom = rep(0,m)
+for (i in 1:N){
+  denom = denom+h[i]*Y[i,]
+}
+theta = denom/sum(h)
+#theta
+
+H = vector()
+for (k in 1:n){
+  Z = vector()
+  for (i in 1:m){
+    Z[i] = rnorm(1, theta[i],1)
+    X[i+1] = max(0, X[i]+sigma*exp(-r*(1-gamma)*t[i])*X[i]^gamma*sqrt(t[i+1]-t[i])*Z[i])
+  }
+  H[k] = max(X[m+1]-exp(-r*T)*K,0)*exp(-sum(theta*Z)+0.5*sum(theta^2))
+}
+
+
+IS_est = mean(H)
+IS_est
+IS_se = sqrt((sum(H^2)-n*IS_est^2)/(n*(n-1)))
+IS_se
+```
+
+
+### Exercise 4.C
+A discretization scheme without discretization error to estimate the option price of a lookback call option.
+```{r}
+S0 = 20
+r = 0.05
+T = 1
+a = 0.4
+b = 0.3
+m = 20    # 5,10,20
+t = (0:m)*T/m
+
+n = 100000
+Y = vector()
+H = vector()
+sigma2 = vector()
+set.seed(29)
+for (k in 1:n){
+  Y[1] = log(S0)
+  S[1] = S0
+  for (i in 1:m){
+    Z = rnorm(1)
+    sigma2[i] = a^2*(t[i+1]-t[i])+b^2*T/(2*pi)*(cos(2*pi*t[i]/T)-cos(2*pi*t[i+1]/T))
+    Y[i+1] = Y[i]+r*(t[i+1]-t[i])-sigma2[i]/2+sqrt(sigma2[i])*Z
+    S[i+1] = exp(Y[i+1])
+  }
+  H[k] = exp(-r*T)*(S[m+1]-min(S))
+}
+
+est_v = mean(H)
+est_v
+est_se = sqrt((sum(H^2)-n*est_v^2)/(n*(n-1)))
+est_se
+```
+
+
+
+
+
+
+
+
+
+
+
+
